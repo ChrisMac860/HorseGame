@@ -1,11 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 
-export const useRaceAnimation = (durationSeconds: number) => {
+export const useRaceAnimation = (
+  durationSeconds: number,
+  shouldRun = true
+) => {
   const [progress, setProgress] = useState(0);
   const frameRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+
+    if (!shouldRun) {
+      setProgress(0);
+      startedAtRef.current = null;
+      return;
+    }
+
     setProgress(0);
     startedAtRef.current = null;
 
@@ -30,11 +44,11 @@ export const useRaceAnimation = (durationSeconds: number) => {
         window.cancelAnimationFrame(frameRef.current);
       }
     };
-  }, [durationSeconds]);
+  }, [durationSeconds, shouldRun]);
 
   return {
     progress,
-    isFinished: progress >= 1,
+    isFinished: shouldRun && progress >= 1,
     skipToFinish: () => {
       if (frameRef.current !== null) {
         window.cancelAnimationFrame(frameRef.current);

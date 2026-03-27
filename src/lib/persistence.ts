@@ -1,5 +1,8 @@
+import { HORSE_NAMES } from '../data/horseNames';
 import { STORAGE_KEY, STORAGE_VERSION } from './constants';
-import type { AppState, HostSettings, PersistedAppState } from './types';
+import type { AppState, HostSettings, PersistedAppState, SessionState } from './types';
+
+const CURRENT_HORSE_NAMES = new Set<string>(HORSE_NAMES);
 
 const isHostSettings = (value: unknown): value is HostSettings => {
   if (!value || typeof value !== 'object') {
@@ -42,6 +45,82 @@ const isSessionLike = (value: unknown) => {
   );
 };
 
+const sanitiseSessionHorseNames = (session: SessionState | null) => {
+  if (!session) {
+    return { session, namesRefreshed: false };
+  }
+
+  let namesRefreshed = false;
+  const rounds = session.rounds.map((round) => {
+    const usedNames = new Set<string>();
+    let roundChanged = false;
+    const horses = round.horses.map((horse, laneIndex) => {
+      if (CURRENT_HORSE_NAMES.has(horse.name) && !usedNames.has(horse.name)) {
+        usedNames.add(horse.name);
+        return horse;
+      }
+
+      namesRefreshed = true;
+      roundChanged = true;
+
+      for (let offset = 0; offset < HORSE_NAMES.length; offset += 1) {
+        const candidate =
+          HORSE_NAMES[(round.roundNumber * 7 + laneIndex + offset) % HORSE_NAMES.length];
+        if (!usedNames.has(candidate)) {
+          usedNames.add(candidate);
+          return {
+            ...horse,
+            name: candidate
+          };
+        }
+      }
+
+      const fallbackName = `Horse ${laneIndex + 1}`;
+      usedNames.add(fallbackName);
+      return {
+        ...horse,
+        name: fallbackName
+      };
+    });
+
+    return roundChanged
+      ? {
+          ...round,
+          horses
+        }
+      : round;
+  });
+
+  return {
+    session: namesRefreshed
+      ? {
+          ...session,
+          rounds
+        }
+      : session,
+    namesRefreshed
+  };
+};
+
+const sanitisePersistedState = (state: PersistedAppState) => {
+  const currentSession = sanitiseSessionHorseNames(state.session);
+  let namesRefreshed = currentSession.namesRefreshed;
+  const history = state.history.map((session) => {
+    const result = sanitiseSessionHorseNames(session);
+    namesRefreshed = namesRefreshed || result.namesRefreshed;
+    return result.session as SessionState;
+  });
+
+  return {
+    persistedState: {
+      ...state,
+      session: currentSession.session,
+      history
+    },
+    namesRefreshed
+  };
+};
+
 export const loadPersistedState = () => {
   try {
     const rawValue = window.localStorage.getItem(STORAGE_KEY);
@@ -59,7 +138,14 @@ export const loadPersistedState = () => {
       };
     }
 
-    return { persistedState: parsedValue, loadNotice: null };
+    const { persistedState, namesRefreshed } = sanitisePersistedState(parsedValue);
+
+    return {
+      persistedState,
+      loadNotice: namesRefreshed
+        ? 'Saved session horse names were refreshed to the current safe list.'
+        : null
+    };
   } catch {
     window.localStorage.removeItem(STORAGE_KEY);
     return {
